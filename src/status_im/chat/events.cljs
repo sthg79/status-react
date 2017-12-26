@@ -54,6 +54,15 @@
   (fn [cofx _]
     (assoc cofx :get-stored-chat chats-store/get-by-id)))
 
+(re-frame/reg-cofx
+  :message-exists?
+  (fn [cofx]
+    (assoc cofx :message-exists? messages-store/exists?)))
+
+(re-frame/reg-cofx
+  :get-last-clock-value
+  (fn [cofx]
+    (assoc cofx :get-last-clock-value messages-store/get-last-clock-value)))
 
 ;;;; Effects
 

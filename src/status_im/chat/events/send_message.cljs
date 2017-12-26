@@ -15,15 +15,6 @@
 
 ;;;; Helper methods
 
-(defn send-notification [fcm-token message]
-  (if (and fcm-token config/notifications-wip-enabled?)
-    (do (log/debug "send-notification fcm-token: " fcm-token)
-        (log/debug "send-notification message: " message)
-        (status/notify fcm-token (fn [res]
-                                   (log/debug "send-notification cb result: " res))))
-    (log/debug "send-notification message not sending because fcm-token is unavailable or notification flag is off")))
-
-
 (defn handle-message-from-bot [cofx {:keys [message chat-id]}]
   (when-let [message (cond
                        (string? message)
@@ -48,12 +39,46 @@
 
 ;;;; Effects
 
+;; TODO (andrey) logic should be outside effect, there should be two effects inc and reset
+
 (re-frame/reg-fx
  :update-message-overhead
  (fn [[chat-id network-status]]
    (if (= network-status :offline)
      (chats-store/inc-message-overhead chat-id)
      (chats-store/reset-message-overhead chat-id))))
+
+;; TODO (andrey) most likely these fx needs to be global
+
+(re-frame/reg-fx
+  ::call-function
+  (fn [value]
+    (status/call-function! value)))
+
+(re-frame/reg-fx
+  ::send-group-message
+  (fn [value]
+    (protocol/send-group-message! value)))
+
+(re-frame/reg-fx
+  ::send-public-group-message
+  (fn [value]
+    (protocol/send-public-group-message! value)))
+
+(re-frame/reg-fx
+  ::send-message
+  (fn [value]
+   (protocol/send-message! value)))
+
+(re-frame/reg-fx
+  ::send-notification
+  (fn [[fcm-token message]]
+    (if (and fcm-token config/notifications-wip-enabled?)
+      (do (log/debug "send-notification fcm-token: " fcm-token)
+          (log/debug "send-notification message: " message)
+          (status/notify fcm-token (fn [res]
+                                     (log/debug "send-notification cb result: " res))))
+      (log/debug "send-notification message not sending because fcm-token is unavailable or notification flag is off"))))
 
 ;;;; Handlers
 
@@ -74,22 +99,21 @@
 (handlers/register-handler-fx
   :chat-send-message/send-message!
   [re-frame/trim-v]
-  (fn [{:keys          [web3 chats network-status]
-        :accounts/keys [accounts current-account-id]
-        :contacts/keys [contacts]
-        :as            db}
+  (fn [{{:keys          [web3 chats network-status]
+         :accounts/keys [accounts current-account-id]
+         :contacts/keys [contacts]
+         :as            db} :db}
        [{{:keys [message-type]
           :as   message} :message
          chat-id         :chat-id}]]
     (let [{:keys [dapp? fcm-token]} (get contacts chat-id)]
       (if dapp?
         (let [data (get-in db [:local-storage chat-id])]
-          (status/call-function!
-            {:chat-id    chat-id
-             :function   :on-message-send
-             :parameters {:message (:content message)}
-             :context    {:data data
-                          :from current-account-id}}))
+          {:call-function {:chat-id    chat-id
+                           :function   :on-message-send
+                           :parameters {:message (:content message)}
+                           :context    {:data data
+                                        :from current-account-id}}})
         (when message
           (let [message' (select-keys message [:from :message-id])
                 payload  (select-keys message [:timestamp :content :content-type
@@ -101,22 +125,21 @@
                           :message (assoc message' :payload payload)}]
             (cond
               (= message-type :group-user-message)
-              (let [{:keys [public-key private-key]} (chats chat-id)]
-                (protocol/send-group-message! (assoc options
-                                                :group-id chat-id
-                                                :keypair {:public  public-key
-                                                          :private private-key})))
+              (let [{:keys [public-key private-key]} (get chats chat-id)]
+                {::send-group-message (assoc options
+                                             :group-id chat-id
+                                             :keypair {:public  public-key
+                                                       :private private-key})})
 
               (= message-type :public-group-user-message)
-              (protocol/send-public-group-message!
-                (let [username (get-in accounts [current-account-id :name])]
-                  (assoc options :group-id chat-id
-                                 :username username)))
+              {::send-public-group-message (assoc options :group-id chat-id
+                                                          :username (get-in accounts [current-account-id :name]))}
 
               :else
-              (do (protocol/send-message! (assoc-in options
-                                                    [:message :to] (:to message)))
-                  (send-notification fcm-token (:message options))))))))))
+              {::send-message (assoc-in options [:message :to] (:to message))
+               ::send-notification [fcm-token (:message options)]})))))))
+
+;;TODO (andrey) what the difference between these two handlers? it looks preaty similar, can we combine it in one?
 
 (handlers/register-handler-fx
   :chat-send-message/send-command!
@@ -145,17 +168,14 @@
                                :payload payload}}]
         (cond
           (and group-chat (not public?))
-          (protocol/send-group-message! (assoc options
-                                          :group-id chat-id
-                                          :keypair {:public public-key
-                                                    :private private-key}))
+          {::send-group-message (assoc options
+                                       :group-id chat-id
+                                       :keypair {:public public-key
+                                                 :private private-key})}
 
           (and group-chat public?)
-          (protocol/send-public-group-message!
-            (let [username (get-in accounts [current-account-id :name])]
-              (assoc options :group-id chat-id
-                             :username username)))
+          {::send-public-group-message (assoc options :group-id chat-id
+                                                      :username (get-in accounts [current-account-id :name]))}
 
           :else
-          (protocol/send-message! (assoc-in options
-                                            [:message :to] chat-id)))))))
+          {::send-message (assoc-in options [:message :to] chat-id)})))))

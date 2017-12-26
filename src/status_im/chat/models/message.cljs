@@ -80,7 +80,6 @@
                 command-request?
                 (requests-events/add-request chat-identifier enriched-message))))))
 
-
 ;;;; Send message
 
 (def send-interceptors
@@ -88,6 +87,7 @@
    (re-frame/inject-cofx :random-id-seq)
    (re-frame/inject-cofx :get-stored-chat)
    (re-frame/inject-cofx :now)
+   (re-frame/inject-cofx :get-last-clock-value)
    re-frame/trim-v])
 
 (defn- prepare-message [clock-value params chat]
@@ -111,11 +111,10 @@
             (assoc :to chat-id :message-type :user-message))))
 
 (defn send-message [{{:keys [network-status] :as db} :db
-                     :keys [now get-stored-chat]}
+                     :keys [now get-stored-chat get-last-clock-value]}
                     {:keys [chat-id] :as params}]
   (let [chat        (get-in db [:chats chat-id])
-        clock-value (messages-store/get-last-clock-value chat-id)
-        message     (prepare-message clock-value params chat)
+        message     (prepare-message (get-last-clock-value chat-id) params chat)
         params'     (assoc params :message message)
 
         cofx        {:db                      (chat-utils/add-message-to-db db chat-id chat-id message)
@@ -168,17 +167,16 @@
 
 (defn send-command
   [{{:keys [current-public-key network-status] :as db} :db
-    :keys [now get-stored-chat random-id-seq]} result add-to-chat-id params]
+    :keys [now get-stored-chat random-id-seq get-last-clock-value]} result add-to-chat-id params]
   (let [{{:keys [handler-data
                  command]
           :as   content} :command
          chat-id         :chat-id} params
-        clock-value   (messages-store/get-last-clock-value chat-id)
         request       (:request handler-data)
         hidden-params (->> (:params command)
                            (filter :hidden)
                            (map :name))
-        command'      (prepare-command current-public-key chat-id clock-value request content)
+        command'      (prepare-command current-public-key chat-id (get-last-clock-value chat-id) request content)
         preview       (get-in db [:message-data :preview (:message-id command')])
         params'       (assoc params :command command')
 

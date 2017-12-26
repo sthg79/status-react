@@ -476,24 +476,6 @@
                                  (set-chat-input-metadata nil)
                                  (set-chat-input-text nil)))))))))
 
-(handlers/register-handler-fx
-  ::send-command
-  message-model/send-interceptors
-  (fn [cofx [{:keys [command] :as command-message}]]
-    (let [{{:keys [current-public-key current-chat-id]
-            :accounts/keys [current-account-id] :as db} :db} cofx
-          cofx' (message-model/process-command cofx
-                                               {:message (get-in db [:chats current-chat-id :input-text])
-                                                :command command-message
-                                                :chat-id current-chat-id
-                                                :identity current-public-key
-                                                :address current-account-id})]
-      (assoc cofx' :db (-> (:db cofx')
-                           (clear-seq-arguments)
-                           (set-chat-input-metadata nil)
-                           (set-chat-input-text nil)
-                           (model/set-chat-ui-props {:sending-in-progress? false}))))))
-
 ;; TODO: remove this handler and leave only helper fn once all invocations are refactored
 (handlers/register-handler-db
   :clear-seq-arguments
