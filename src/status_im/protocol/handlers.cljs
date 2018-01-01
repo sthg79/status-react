@@ -329,7 +329,7 @@
               route-event (case type
                             (:message
                              :group-message
-                             :public-group-message) [:chat-received-message/add (transform-protocol-message message)]
+                             :public-group-message) [:pre-received-message (transform-protocol-message message)]
                             :ack                    (if (#{:message :group-message} (:type payload))
                                                       [:update-message-status message :delivered]
                                                       [:pending-message-remove message])
